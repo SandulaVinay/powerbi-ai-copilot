@@ -1,0 +1,50 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Environment variables / secrets
+.env
+.env.*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Cache
+data/answer_cache.json
+*.cache
+
+# Python tooling
+.pytest_cache/
+.mypy_cache/
+
+# Local databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Temporary files
+*.tmp
+*.temp
+
+# Model/cache directories
+.cache/
+huggingface/
+
+retrieval_diagnostic_results.json
+retrieval_architecture_comparison.json
+
