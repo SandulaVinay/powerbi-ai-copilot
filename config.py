@@ -6,6 +6,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Keep the default deployment memory-safe. Local development can opt into
+# the heavier hybrid retriever with RAG_MODE=hybrid in .env.
+os.environ.setdefault("RAG_MODE", "bm25")
+
 TAVILY_API_KEY = os.getenv(
     "TAVILY_API_KEY"
 )
