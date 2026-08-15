@@ -3,8 +3,6 @@ uvicorn[standard]
 pydantic
 numpy
 rank-bm25
-sentence-transformers
-torch
 groq
 python-dotenv
 tavily-python
