@@ -3,10 +3,6 @@ import re
 
 class QueryRouter:
 
-    # ========================================================
-    # POWER BI / BUSINESS INTELLIGENCE DOMAIN
-    # ========================================================
-
     POWER_BI_TERMS = [
         r"\bpower\s*bi\b", r"\bpbi\b", r"\bmicrosoft\s*fabric\b", r"\bfabric\b",
         r"\bpower\s*query\b", r"\bpower\s*bi\s*desktop\b", r"\bpower\s*bi\s*service\b",
@@ -29,45 +25,47 @@ class QueryRouter:
         r"\bcohort\s+analysis\b", r"\bkpi\b", r"\bkpi\s+card\b", r"\bkpi\s+cards\b",
     ]
 
-    # Questions that are very likely to need a Microsoft/web source when the
-    # local corpus does not contain the exact topic. These were previously
-    # sent to BM25, which then returned an unrelated Power BI document.
+    DAX_FUNCTIONS = {
+        "IF", "SWITCH", "AND", "OR", "NOT", "TRUE", "FALSE", "COALESCE", "IFERROR",
+        "SUM", "SUMX", "AVERAGE", "AVERAGEX", "MIN", "MINX", "MAX", "MAXX",
+        "COUNT", "COUNTA", "COUNTAX", "COUNTBLANK", "COUNTROWS", "DISTINCTCOUNT",
+        "CALCULATE", "CALCULATETABLE", "FILTER", "ALL", "ALLEXCEPT", "ALLSELECTED",
+        "REMOVEFILTERS", "KEEPFILTERS", "TREATAS", "DATE", "DATEDIFF", "DATEVALUE",
+        "DAY", "EDATE", "EOMONTH", "HOUR", "MINUTE", "MONTH", "NOW", "QUARTER",
+        "SECOND", "TIME", "TIMEVALUE", "TODAY", "WEEKDAY", "WEEKNUM", "YEAR",
+        "CLOSINGBALANCEMONTH", "CLOSINGBALANCEQUARTER", "CLOSINGBALANCEYEAR", "DATESBETWEEN",
+        "DATESINPERIOD", "DATESMTD", "DATESQTD", "DATESYTD", "ENDOFMONTH", "ENDOFQUARTER",
+        "ENDOFYEAR", "FIRSTDATE", "LASTDATE", "NEXTDAY", "NEXTMONTH", "NEXTQUARTER",
+        "NEXTYEAR", "PREVIOUSDAY", "PREVIOUSMONTH", "PREVIOUSQUARTER", "PREVIOUSYEAR",
+        "STARTOFMONTH", "STARTOFQUARTER", "STARTOFYEAR", "TOTALMTD", "TOTALQTD", "TOTALYTD",
+        "CONCATENATE", "CONCATENATEX", "CONTAINSSTRING", "EXACT", "FIND", "FORMAT", "LEFT",
+        "LEN", "LOWER", "MID", "REPLACE", "RIGHT", "SEARCH", "SUBSTITUTE", "TRIM", "UPPER",
+        "VALUE", "ABS", "CEILING", "DIVIDE", "EXP", "FLOOR", "INT", "LN", "LOG", "MOD",
+        "POWER", "ROUND", "ROUNDDOWN", "ROUNDUP", "SQRT", "TRUNC", "ADDCOLUMNS", "CROSSJOIN",
+        "DISTINCT", "EXCEPT", "GENERATE", "GENERATESERIES", "GROUPBY", "INTERSECT", "SELECTCOLUMNS",
+        "SUMMARIZE", "SUMMARIZECOLUMNS", "UNION", "VALUES", "CROSSFILTER", "RELATED", "RELATEDTABLE",
+        "USERELATIONSHIP", "ISBLANK", "ISERROR", "ISEMPTY", "ISFILTERED", "ISINSCOPE", "ISNUMBER",
+        "ISTEXT", "HASONEFILTER", "HASONEVALUE", "MEDIAN", "MEDIANX", "RANK", "RANKX", "STDEV.P",
+        "STDEV.S", "VAR.P", "VAR.S"
+    }
+
     KNOWLEDGE_GAP_WEB_PATTERNS = [
-        r"\bhow\s+to\s+install\b",
-        r"\binstall\b.*\bpower\s*bi\b",
-        r"\bpower\s*bi\s+desktop\b.*\binstall\b",
-        r"\bdate\s+function(s)?\b",
-        r"\bdax\s+function(s)?\b",
-        r"\bchurn\b",
-        r"\bretention\b",
-        r"\bcohort\b",
-        r"\btmdl\b.*\bhow\b",
-        r"\bhow\s+to\s+use\s+tmdl\b",
-        r"\bpower\s*bi\s+certification\b",
-        r"\bcertification\b.*\bpower\s*bi\b",
-        r"\blearn\s+power\s*bi\b",
-        r"\blearning\s+power\s*bi\b",
+        r"\bhow\s+to\s+install\b", r"\binstall\b.*\bpower\s*bi\b",
+        r"\bpower\s*bi\s+desktop\b.*\binstall\b", r"\bdate\s+function(s)?\b",
+        r"\bdax\s+function(s)?\b", r"\bchurn\b", r"\bretention\b", r"\bcohort\b",
+        r"\btmdl\b.*\bhow\b", r"\bhow\s+to\s+use\s+tmdl\b",
+        r"\bpower\s*bi\s+certification\b", r"\bcertification\b.*\bpower\s*bi\b",
+        r"\blearn\s+power\s*bi\b", r"\blearning\s+power\s*bi\b",
         r"\bpower\s*bi\s+(course|courses|training|tutorial|tutorials)\b",
-        r"\b(youtube|videos?)\b.*\bpower\s*bi\b",
-        r"\bwhat\s+is\s+power\s*bi\b",
+        r"\b(youtube|videos?)\b.*\bpower\s*bi\b", r"\bwhat\s+is\s+power\s*bi\b",
         r"\bhow\s+does\s+power\s*bi\s+work\b",
     ]
 
-    # Stable topics that are expected to be covered well by the local corpus.
     LOCAL_CORE_PATTERNS = [
-        r"\bincremental\s+refresh\b",
-        r"\bdirectquery\b",
-        r"\bquery\s+folding\b",
-        r"\bdata\s+refresh\b",
-        r"\bsemantic\s+model\b",
-        r"\bcalculated\s+column\b",
-        r"\bcalculated\s+table\b",
-        r"\bmeasure(s)?\b",
+        r"\bincremental\s+refresh\b", r"\bdirectquery\b", r"\bquery\s+folding\b",
+        r"\bdata\s+refresh\b", r"\bsemantic\s+model\b", r"\bcalculated\s+column\b",
+        r"\bcalculated\s+table\b", r"\bmeasure(s)?\b",
     ]
-
-    # ========================================================
-    # WEB / CURRENT INFORMATION PATTERNS
-    # ========================================================
 
     WEB_PATTERNS = [
         r"\blatest\b", r"\bcurrent\b", r"\bcurrently\b", r"\bright\s+now\b",
@@ -75,12 +73,11 @@ class QueryRouter:
         r"\bthis\s+year\b", r"\brecent\b", r"\brecently\b", r"\bnewest\b",
         r"\bmost\s+recent\b", r"\bwhat'?s\s+new\b", r"\bwhat\s+is\s+new\b",
         r"\bwhat\s+are\s+the\s+new\b", r"\bnew\s+update\b", r"\bnew\s+updates\b",
-        r"\blatest\s+update\b", r"\blatest\s+updates\b", r"\bnew\s+feature\b",
-        r"\bnew\s+features\b", r"\blatest\s+feature\b", r"\blatest\s+features\b",
-        r"\bwhat\s+changed\b", r"\bwhat\s+has\s+changed\b", r"\bchanges\b",
-        r"\bupdates\b", r"\bupdate\b", r"\brelease\s+date\b", r"\brelease\b",
-        r"\breleased\b", r"\bintroduced\b", r"\bannounced\b", r"\bannouncement\b",
-        r"\blaunch(?:ed)?\b", r"\bpreview\b", r"\bpublic\s+preview\b",
+        r"\bnew\s+feature\b", r"\bnew\s+features\b", r"\blatest\s+feature\b",
+        r"\blatest\s+features\b", r"\bwhat\s+changed\b", r"\bwhat\s+has\s+changed\b",
+        r"\bchanges\b", r"\bupdates\b", r"\bupdate\b", r"\brelease\s+date\b",
+        r"\brelease\b", r"\breleased\b", r"\bintroduced\b", r"\bannounced\b",
+        r"\bannouncement\b", r"\blaunch(?:ed)?\b", r"\bpreview\b", r"\bpublic\s+preview\b",
         r"\bdeprecat(?:ed|ion|e)\b", r"\bretired\b", r"\bwho\s+invented\b",
         r"\bwho\s+created\b", r"\bwho\s+developed\b", r"\bwho\s+founded\b",
         r"\bwho\s+built\b", r"\bwho\s+made\b", r"\bwho\s+was\s+behind\b",
@@ -89,9 +86,8 @@ class QueryRouter:
         r"\bwhen\s+was\b", r"\bwhen\s+did\b", r"\bwhen\s+was\s+it\s+created\b",
         r"\bwhen\s+was\s+it\s+released\b", r"\bvs\.?\b", r"\bversus\b",
         r"\bcompare\b", r"\bcomparison\b", r"\bcomparisons\b",
-        r"\bdifference\s+between\b", r"\bdifferences\s+between\b",
-        r"\bdiffer\s+from\b", r"\bbetter\s+than\b", r"\bwhich\s+is\s+better\b",
-        r"\bpros\s+and\s+cons\b",
+        r"\bdifference\s+between\b", r"\bdifferences\s+between\b", r"\bdiffer\s+from\b",
+        r"\bbetter\s+than\b", r"\bwhich\s+is\s+better\b", r"\bpros\s+and\s+cons\b",
     ]
 
     OFF_TOPIC_PATTERNS = [
@@ -105,6 +101,14 @@ class QueryRouter:
         r"\bmake\s+a\s+game\b", r"\bwrite\s+python\s+code\b", r"\bwrite\s+javascript\b",
         r"\bwrite\s+java\s+code\b", r"\bprogram\s+a\s+game\b",
     ]
+
+    @classmethod
+    def is_dax_function_question(cls, question):
+        q = str(question).lower().strip()
+        has_dax_signal = bool(re.search(r"\bdax\b|\bfunction(s)?\b|\bmeasure(s)?\b", q))
+        if not has_dax_signal:
+            return False
+        return any(re.search(r"\b" + re.escape(fn.lower()) + r"\b", q) for fn in cls.DAX_FUNCTIONS)
 
     @classmethod
     def is_power_bi_domain(cls, question):
@@ -138,8 +142,12 @@ class QueryRouter:
         if not question:
             return "reject"
 
-        # A BI question mentioning movies is still in-domain, e.g.:
-        # "How can I create a Power BI dashboard for movies?"
+        # DAX function questions are knowledge questions. Route them to live
+        # Microsoft documentation so comparisons can retrieve every named
+        # function instead of an unrelated local chunk.
+        if cls.is_dax_function_question(question):
+            return "web"
+
         if cls.is_off_topic(question) and not cls.is_power_bi_domain(question):
             return "reject"
 
@@ -150,7 +158,6 @@ class QueryRouter:
                 return "local"
             return "local"
 
-        # Implicit BI terminology.
         implicit_bi_patterns = [
             r"\bsemantic\b", r"\bdata\s+model\b", r"\bdata\s+modeling\b",
             r"\bdata\s+visualization\b", r"\bbusiness\s+analytics\b",
