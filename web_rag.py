@@ -21,7 +21,6 @@ class WebRAG:
         "community.fabric.microsoft.com",
     ]
 
-    # High-value DAX concepts used to expand multi-function questions.
     DAX_FUNCTIONS = {
         "if", "switch", "calculate", "calculatetable", "filter", "all",
         "removefilters", "keepfilters", "sum", "sumx", "average", "averagex",
@@ -30,6 +29,15 @@ class WebRAG:
         "mid", "search", "find", "related", "relatedtable", "userelationship",
         "values", "distinct", "summarize", "summarizecolumns", "addcolumns",
         "rankx", "divide", "coalesce", "hasonevalue", "isblank"
+    }
+
+    # Functions that are often useful when a user asks for an alternative to
+    # IF/SWITCH. They are retrieval hints, not claims that these functions are
+    # universal replacements.
+    DAX_ALTERNATIVE_FUNCTIONS = {
+        "coalesce", "calculate", "calculatetable", "filter", "keepfilters",
+        "removefilters", "isblank", "iserror", "containsstring", "divide",
+        "hasonevalue", "selectedvalue", "true", "false"
     }
 
     def __init__(self):
@@ -70,23 +78,45 @@ class WebRAG:
         return any(re.search(pattern, q) for pattern in patterns)
 
     @staticmethod
-    def build_search_query(question: str) -> str:
+    def _is_alternative_query(question: str) -> bool:
+        q = question.lower()
+        patterns = [
+            r"\balternative(s)?\b", r"\balternate\b", r"\bother\s+than\b",
+            r"\binstead\s+of\b", r"\breplacement\b", r"\breplace\b",
+            r"\bwhat\s+else\b", r"\banything\s+else\b",
+            r"\bwhich\s+.*\buse\b", r"\bwhat\s+.*\buse\b"
+        ]
+        return any(re.search(pattern, q) for pattern in patterns)
+
+    @classmethod
+    def build_search_query(cls, question: str) -> str:
         now = datetime.now()
         current_month = now.strftime("%B")
         current_year = now.strftime("%Y")
         q = question.strip()
 
-        if WebRAG.is_temporal_query(q):
+        if cls.is_temporal_query(q):
             return (
                 "Power BI "
                 f"{current_month} {current_year} "
                 "latest update Microsoft Power BI What's New"
             )
 
-        dax_functions = WebRAG._extract_dax_functions(q)
+        dax_functions = cls._extract_dax_functions(q)
         is_dax = bool(dax_functions) or bool(re.search(r"\bDAX\b", q, re.I))
+        alternative = cls._is_alternative_query(q)
 
-        if is_dax and WebRAG._is_comparison_query(q):
+        if is_dax and alternative:
+            entities = " ".join(dax_functions)
+            alternatives = " ".join(sorted(cls.DAX_ALTERNATIVE_FUNCTIONS))
+            return (
+                "site:learn.microsoft.com/en-us/dax "
+                f"DAX alternative functions conditional logic {entities} "
+                f"related functions {alternatives} "
+                "IF SWITCH alternatives replacement when to use"
+            )
+
+        if is_dax and cls._is_comparison_query(q):
             entities = " ".join(dax_functions)
             return (
                 f"site:learn.microsoft.com/en-us/dax "
@@ -101,14 +131,12 @@ class WebRAG:
                 f"DAX function reference {entities}"
             )
 
-        if WebRAG._is_comparison_query(q):
+        if cls._is_comparison_query(q):
             return (
                 f"Power BI comparison {q} "
                 "Microsoft Learn Power BI Tableau Qlik"
             )
 
-        # Foundational Power BI questions need a canonical overview rather than
-        # an arbitrary related page such as refresh or gateway documentation.
         if re.search(r"\bwhat\s+is\s+power\s*bi\b", q, re.I):
             return (
                 "site:learn.microsoft.com/en-us/power-bi "
@@ -191,6 +219,7 @@ class WebRAG:
         q_tokens = set(re.findall(r"\w+", question.lower()))
         dax_functions = set(x.lower() for x in self._extract_dax_functions(question))
         comparison = self._is_comparison_query(question)
+        alternative = self._is_alternative_query(question)
 
         def score(item):
             url = item.get("url", "").lower()
@@ -208,7 +237,6 @@ class WebRAG:
             if current_month in text:
                 value += 1.0
 
-            # Reward evidence containing the concepts explicitly requested.
             text_tokens = set(re.findall(r"\w+", text))
             value += min(3.0, 0.35 * len(q_tokens & text_tokens))
 
@@ -216,8 +244,11 @@ class WebRAG:
                 matched = sum(1 for fn in dax_functions if fn in text_tokens)
                 value += min(6.0, 2.0 * matched)
 
-            # Comparison questions should not be dominated by a page about only
-            # one side. Reward pages containing multiple requested entities.
+            if alternative:
+                related = {x.lower() for x in self.DAX_ALTERNATIVE_FUNCTIONS}
+                matched_related = sum(1 for fn in related if fn in text_tokens)
+                value += min(4.0, 0.5 * matched_related)
+
             if comparison:
                 competitors = {"power", "bi", "tableau", "qlik", "fabric"}
                 value += min(3.0, 0.5 * len(competitors & text_tokens))
