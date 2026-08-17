@@ -49,6 +49,15 @@ class QueryRouter:
         "STDEV.S", "VAR.P", "VAR.S"
     }
 
+    DAX_INTENT_PATTERNS = [
+        r"\bdifference\s+between\b", r"\bdifferences\s+between\b", r"\bvs\.?\b",
+        r"\bversus\b", r"\bcompare\b", r"\bcomparison\b", r"\bcompare\s+between\b",
+        r"\balternative\b", r"\balternatives\b", r"\balternate\b", r"\breplace\b",
+        r"\breplacement\b", r"\bother\s+than\b", r"\binstead\s+of\b", r"\bwhich\s+should\s+i\s+use\b",
+        r"\bwhen\s+should\s+i\s+use\b", r"\bwhat\s+should\s+i\s+use\b",
+        r"\bwhat\s+is\b", r"\bexplain\b", r"\bhow\s+does\b", r"\bhow\s+to\b",
+    ]
+
     KNOWLEDGE_GAP_WEB_PATTERNS = [
         r"\bhow\s+to\s+install\b", r"\binstall\b.*\bpower\s*bi\b",
         r"\bpower\s*bi\s+desktop\b.*\binstall\b", r"\bdate\s+function(s)?\b",
@@ -103,12 +112,35 @@ class QueryRouter:
     ]
 
     @classmethod
+    def extract_dax_functions(cls, question):
+        q = str(question).lower().strip()
+        return sorted({
+            fn.upper()
+            for fn in cls.DAX_FUNCTIONS
+            if re.search(r"\b" + re.escape(fn.lower()) + r"\b", q)
+        })
+
+    @classmethod
     def is_dax_function_question(cls, question):
         q = str(question).lower().strip()
-        has_dax_signal = bool(re.search(r"\bdax\b|\bfunction(s)?\b|\bmeasure(s)?\b", q))
-        if not has_dax_signal:
+        functions = cls.extract_dax_functions(q)
+        if not functions:
             return False
-        return any(re.search(r"\b" + re.escape(fn.lower()) + r"\b", q) for fn in cls.DAX_FUNCTIONS)
+        has_dax_signal = bool(re.search(r"\bdax\b|\bfunction(s)?\b|\bmeasure(s)?\b", q))
+        has_question_signal = any(re.search(pattern, q) for pattern in cls.DAX_INTENT_PATTERNS)
+        return has_dax_signal or has_question_signal
+
+    @classmethod
+    def is_dax_alternative_question(cls, question):
+        q = str(question).lower().strip()
+        functions = cls.extract_dax_functions(q)
+        if not functions:
+            return False
+        return any(re.search(pattern, q) for pattern in [
+            r"\balternative(s)?\b", r"\balternate\b", r"\bother\s+than\b",
+            r"\binstead\s+of\b", r"\breplacement\b", r"\breplace\b",
+            r"\bwhich\s+.*\buse\b", r"\bwhat\s+.*\buse\b"
+        ])
 
     @classmethod
     def is_power_bi_domain(cls, question):
@@ -142,9 +174,9 @@ class QueryRouter:
         if not question:
             return "reject"
 
-        # DAX function questions are knowledge questions. Route them to live
-        # Microsoft documentation so comparisons can retrieve every named
-        # function instead of an unrelated local chunk.
+        # DAX function names themselves are domain signals. This prevents
+        # questions such as "SUM vs SUMX" from being rejected merely because
+        # the user did not type the word DAX or Power BI.
         if cls.is_dax_function_question(question):
             return "web"
 
