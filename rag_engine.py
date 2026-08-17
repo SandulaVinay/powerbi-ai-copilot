@@ -27,15 +27,13 @@ class RAGEngine:
     RAG_MODE=bm25   -> BM25 + live Web RAG + Groq. Designed for small hosts.
     RAG_MODE=hybrid -> BM25 + embeddings + cross-encoder reranker for local use.
 
-    Local retrieval now has a domain-safe live-web fallback: if a Power BI / Fabric /
+    Local retrieval has a domain-safe live-web fallback: if a Power BI / Fabric /
     DAX / BI question gets weak or incomplete local evidence, it is sent to WebRAG.
     Unrelated questions are never sent to the web fallback.
     """
 
-    # Conservative thresholds for deciding whether local BM25 evidence is useful.
-    # These are deliberately easy to tune after observing production queries.
     LOCAL_MIN_BM25_SCORE = 1.0
-    LOCAL_MIN_TOKEN_OVERLAP = 1
+    LOCAL_MIN_TOKEN_OVERLAP = 2
 
     def __init__(self):
         print("=" * 70)
@@ -59,12 +57,14 @@ class RAGEngine:
 
         self.chunks = list(unique_chunks.values())
         self.documents = [self.normalize(c.get("text", "")) for c in self.chunks]
+        self.dax_functions = self._load_dax_function_catalog()
 
         print(f"Chunks loaded    : {len(self.chunks)}")
         print(
             "Unique documents : "
             f"{len({c.get('document_id') for c in self.chunks if c.get('document_id')})}"
         )
+        print(f"DAX functions loaded : {len(self.dax_functions)}")
 
         print("\nBuilding BM25 index...")
         self.bm25 = BM25Okapi([self.tokenize(t) for t in self.documents])
@@ -100,6 +100,45 @@ class RAGEngine:
 
         print("\nRAG engine initialization complete.")
         print("=" * 70)
+
+    @staticmethod
+    def _load_dax_function_catalog():
+        """Load the structured DAX catalog without making it a hard-coded router list."""
+        catalog_path = os.path.join(
+            os.path.dirname(CHUNKS_FILE),
+            "dax_function_catalog.json",
+        )
+        try:
+            with open(catalog_path, "r", encoding="utf-8") as file:
+                catalog = json.load(file)
+            functions = set()
+            for names in catalog.get("categories", {}).values():
+                functions.update(str(name).upper() for name in names)
+            return functions
+        except (FileNotFoundError, json.JSONDecodeError, TypeError):
+            return set()
+
+    def _is_implicit_dax_question(self, question):
+        """Recognize short DAX questions even when the user never says 'DAX'."""
+        q = str(question).lower().strip()
+        if not self.dax_functions:
+            return False
+
+        matched = [
+            fn for fn in self.dax_functions
+            if re.search(r"\b" + re.escape(fn.lower()) + r"\b", q)
+        ]
+        if not matched:
+            return False
+
+        has_question_signal = bool(
+            re.search(
+                r"\bvs\.?\b|\bversus\b|\bdifference\b|\bcompare\b|\bexplain\b|"
+                r"\bwhat\s+is\b|\bhow\s+does\b|\bwhen\s+should\b|\bfunction(s)?\b",
+                q,
+            )
+        )
+        return has_question_signal or len(matched) >= 2
 
     def _load_hybrid_models(self):
         from sentence_transformers import SentenceTransformer, CrossEncoder
@@ -242,13 +281,7 @@ class RAGEngine:
 
     @classmethod
     def _local_evidence_quality(cls, question, sources):
-        """Return whether local evidence is strong enough to answer safely.
-
-        BM25 can always return something, even for a bad match. We therefore
-        require either a meaningful lexical score or a minimum overlap with the
-        question. This prevents unrelated documents from being treated as
-        authoritative evidence.
-        """
+        """Decide whether local evidence is strong enough to answer safely."""
         if not sources:
             return False
 
@@ -265,7 +298,6 @@ class RAGEngine:
             return True
         if overlap >= cls.LOCAL_MIN_TOKEN_OVERLAP:
             return True
-
         return False
 
     def _should_web_fallback(self, question, route, sources):
@@ -275,12 +307,8 @@ class RAGEngine:
         if self.web_rag is None:
             return False
 
-        # QueryRouter is the domain boundary. If it says the question is not a
-        # supported Power BI/Fabric/DAX/BI question, never send it to the web.
         if not self.query_router.is_power_bi_domain(question):
-            # DAX questions can be implicit (e.g. "SUM vs SUMX") and may not
-            # contain the words Power BI/DAX, so allow the router's DAX detector.
-            if not self.query_router.is_dax_function_question(question):
+            if not self._is_implicit_dax_question(question):
                 return False
 
         return not self._local_evidence_quality(question, sources)
@@ -390,6 +418,13 @@ class RAGEngine:
         question = str(question).strip()
 
         route = self.query_router.classify(question)
+
+        # The structured DAX catalog is the source of truth for implicit DAX
+        # questions such as "SUM vs SUMX". This avoids requiring the user to
+        # type the words "DAX" or "Power BI".
+        if route == "reject" and self._is_implicit_dax_question(question):
+            route = "web"
+
         print(f"\nQuery route: {route}")
 
         if route == "reject":
@@ -420,10 +455,7 @@ class RAGEngine:
                 sources = self._local_bm25(question)
                 retrieval_type = "local_bm25"
 
-        # Domain-safe fallback: local retrieval is authoritative only when it
-        # produces useful evidence. If it does not, and the question is still
-        # inside our supported BI domain, retry against the live web index.
-        if self._should_web_fallback(question, route, sources):
+        if route == "local" and self._should_web_fallback(question, route, sources):
             print("Local evidence is weak; falling back to live web RAG.")
             web_result = self.web_rag.search(question)
             web_sources = self._web_sources(web_result)
