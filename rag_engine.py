@@ -27,9 +27,15 @@ class RAGEngine:
     RAG_MODE=bm25   -> BM25 + live Web RAG + Groq. Designed for small hosts.
     RAG_MODE=hybrid -> BM25 + embeddings + cross-encoder reranker for local use.
 
-    Heavy sentence-transformers imports are lazy, so BM25 production mode
-    never loads PyTorch, the embedding model, or the cross-encoder into RAM.
+    Local retrieval now has a domain-safe live-web fallback: if a Power BI / Fabric /
+    DAX / BI question gets weak or incomplete local evidence, it is sent to WebRAG.
+    Unrelated questions are never sent to the web fallback.
     """
+
+    # Conservative thresholds for deciding whether local BM25 evidence is useful.
+    # These are deliberately easy to tune after observing production queries.
+    LOCAL_MIN_BM25_SCORE = 1.0
+    LOCAL_MIN_TOKEN_OVERLAP = 1
 
     def __init__(self):
         print("=" * 70)
@@ -234,6 +240,51 @@ class RAGEngine:
             })
         return sources
 
+    @classmethod
+    def _local_evidence_quality(cls, question, sources):
+        """Return whether local evidence is strong enough to answer safely.
+
+        BM25 can always return something, even for a bad match. We therefore
+        require either a meaningful lexical score or a minimum overlap with the
+        question. This prevents unrelated documents from being treated as
+        authoritative evidence.
+        """
+        if not sources:
+            return False
+
+        question_tokens = set(cls.tokenize(question))
+        if not question_tokens:
+            return False
+
+        top = sources[0]
+        top_score = float(top.get("score", 0.0) or 0.0)
+        top_tokens = set(cls.tokenize(top.get("text", "")))
+        overlap = len(question_tokens & top_tokens)
+
+        if top_score >= cls.LOCAL_MIN_BM25_SCORE:
+            return True
+        if overlap >= cls.LOCAL_MIN_TOKEN_OVERLAP:
+            return True
+
+        return False
+
+    def _should_web_fallback(self, question, route, sources):
+        """Only allow web fallback for questions inside the supported BI domain."""
+        if route != "local":
+            return False
+        if self.web_rag is None:
+            return False
+
+        # QueryRouter is the domain boundary. If it says the question is not a
+        # supported Power BI/Fabric/DAX/BI question, never send it to the web.
+        if not self.query_router.is_power_bi_domain(question):
+            # DAX questions can be implicit (e.g. "SUM vs SUMX") and may not
+            # contain the words Power BI/DAX, so allow the router's DAX detector.
+            if not self.query_router.is_dax_function_question(question):
+                return False
+
+        return not self._local_evidence_quality(question, sources)
+
     @staticmethod
     def _clean_model_sources(answer):
         answer = re.sub(
@@ -294,13 +345,16 @@ class RAGEngine:
 
     def _generate(self, question, context, sources):
         system = (
-            "You are Vinay's Power BI Copilot, a focused Business Intelligence assistant.\n"
+            "You are Vinay's Power BI Copilot, a friendly and focused Business Intelligence assistant.\n"
             "Answer only questions within Power BI, Microsoft Fabric, Power Query, DAX, "
             "semantic models, Power BI Service/Desktop, BI analytics, administration, "
             "performance, or closely related BI technologies.\n"
             "Use only the supplied retrieved context for factual claims. If the context "
             "does not support the answer, say that clearly.\n"
-            "Write a concise, well-structured Markdown answer. Use headings, bullets, "
+            "For natural follow-up questions, use the current question and retrieved context "
+            "to answer conversationally. Do not require the user to repeat 'Power BI' when "
+            "the retrieved context clearly establishes the topic.\n"
+            "Write a concise, friendly, well-structured Markdown answer. Use headings, bullets, "
             "or tables when useful.\n"
             "Do not invent URLs or sources. Do not create a Sources/References section; "
             "the application adds the source list separately.\n"
@@ -365,6 +419,18 @@ class RAGEngine:
             else:
                 sources = self._local_bm25(question)
                 retrieval_type = "local_bm25"
+
+        # Domain-safe fallback: local retrieval is authoritative only when it
+        # produces useful evidence. If it does not, and the question is still
+        # inside our supported BI domain, retry against the live web index.
+        if self._should_web_fallback(question, route, sources):
+            print("Local evidence is weak; falling back to live web RAG.")
+            web_result = self.web_rag.search(question)
+            web_sources = self._web_sources(web_result)
+            if web_sources:
+                sources = web_sources
+                retrieval_type = "local_fallback_web"
+                route = "web_fallback"
 
         retrieval_time = time.perf_counter() - retrieval_start
 
